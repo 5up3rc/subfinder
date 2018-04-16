@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	//"github.com/miekg/dns"
 )
 
@@ -41,24 +42,25 @@ func InitializeWildcardDNS(state *State) bool {
 
 // Checks if a given subdomain is a wildcard subdomain
 // It takes Current application state, Domain to find subdomains for
-func CheckWildcardSubdomain(state *State, domain string, words chan string, donech chan struct{}, result chan string) {
-	for target := range words {
-		preparedSubdomain := target + "." + domain
+func CheckWildcardSubdomain(state *State, domain string, words <-chan string, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	for {
+		preparedSubdomain := <-words + "." + domain
 		ipAddress, err := net.LookupHost(preparedSubdomain)
 
 		if err == nil {
 			// No eror, let's see if it's a Wildcard subdomain
 			if !state.WildcardIPs.ContainsAny(ipAddress) {
-				result <- preparedSubdomain
-				donech <- struct{}{}
+				if state.Verbose == true {
+					fmt.Printf("\n%s", preparedSubdomain)
+				}
+
+				state.FinalResults = append(state.FinalResults, preparedSubdomain)
 			} else {
 				// This is likely a wildcard entry, skip it
-				result <- ""
-				donech <- struct{}{}
 			}
 		} else {
-			result <- ""
-			donech <- struct{}{}
 		}
 	}
 }
@@ -70,37 +72,22 @@ func RemoveWildcardSubdomains(state *State, subdomains []string) []string {
 		fmt.Printf("\n\n%s[!]%s Wildcard DNS Detected ! False Positives are likely :-(\n\n", Cyan, Reset)
 	}
 
-	var validSubdomains []string
-
+	var wg sync.WaitGroup
 	var channel = make(chan string)
-	var donech = make(chan struct{})
-	var result = make(chan string)
+
+	wg.Add(state.Threads)
 
 	for i := 0; i < state.Threads; i++ {
-		go CheckWildcardSubdomain(state, state.Domain, channel, donech, result)
+		go CheckWildcardSubdomain(state, state.Domain, channel, &wg)
 	}
 
 	for _, entry := range subdomains {
 		sub := strings.Join(strings.Split(entry, ".")[:2][:], ".")
-		fmt.Printf("\n[!] %s", sub+"."+state.Domain)
 		channel <- sub
 	}
 
-	for _, _ = range subdomains {
-		result := <-channel
-		if state.Verbose == true {
-			fmt.Printf("\n[-] %s", result)
-		}
-		if result != "" {
-			validSubdomains = append(validSubdomains, result)
-		}
-	}
-
 	close(channel)
+	wg.Wait()
 
-	for i := 0; i < state.Threads; i++ {
-		<-donech
-	}
-
-	return validSubdomains
+	return state.FinalResults
 }
