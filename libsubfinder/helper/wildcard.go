@@ -1,7 +1,7 @@
-// 
+//
 // wildcard.go : Wildcard elimination method for eliminating false subdomains
 // Written By : @ice3man (Nizamul Rana)
-// 
+//
 // Distributed Under MIT License
 // Copyrights (C) 2018 Ice3man
 //
@@ -9,11 +9,9 @@
 package helper
 
 import (
-	"net"
 	"fmt"
-	"sync"
+	"net"
 	"strings"
-
 	//"github.com/miekg/dns"
 )
 
@@ -22,7 +20,7 @@ import (
 func InitializeWildcardDNS(state *State) bool {
 	// Generate a random UUID and check if server responds with a valid
 	// IP Address. If so, we are dealing with a wildcard DNS Server and will have
-	// to work accordingly. 
+	// to work accordingly.
 	// In case of wildcard DNS, we will ignore any subdomain which has same IP
 	// as our random UUID one
 	uuid, _ := NewUUID()
@@ -30,7 +28,7 @@ func InitializeWildcardDNS(state *State) bool {
 	// Gets a list of IP's by resolving a non-existent host
 	wildcardIPs, err := net.LookupHost(fmt.Sprintf("%s.%s", uuid, state.Domain))
 
-	if err == nil{
+	if err == nil {
 		state.IsWildcard = true
 		state.WildcardIPs.AddRange(wildcardIPs)
 
@@ -43,24 +41,25 @@ func InitializeWildcardDNS(state *State) bool {
 
 // Checks if a given subdomain is a wildcard subdomain
 // It takes Current application state, Domain to find subdomains for
-func CheckWildcardSubdomain(state *State, domain string, channel chan string) {
-	for target := range channel {
+func CheckWildcardSubdomain(state *State, domain string, words chan string, donech chan struct{}, result chan string) {
+	for target := range words {
 		preparedSubdomain := target + "." + domain
 		ipAddress, err := net.LookupHost(preparedSubdomain)
-			
+
 		if err == nil {
 			// No eror, let's see if it's a Wildcard subdomain
 			if !state.WildcardIPs.ContainsAny(ipAddress) {
-					channel <- preparedSubdomain
+				result <- preparedSubdomain
+				donech <- struct{}{}
 			} else {
-					// This is likely a wildcard entry, skip it
-					channel <- ""
+				// This is likely a wildcard entry, skip it
+				result <- ""
+				donech <- struct{}{}
 			}
 		} else {
-			channel <- ""
+			result <- ""
+			donech <- struct{}{}
 		}
-
-		channel <- ""
 	}
 }
 
@@ -73,17 +72,13 @@ func RemoveWildcardSubdomains(state *State, subdomains []string) []string {
 
 	var validSubdomains []string
 
-    var wg sync.WaitGroup
 	var channel = make(chan string)
-	
-	wg.Add(state.Threads)
+	var donech = make(chan struct{})
+	var result = make(chan string)
 
 	for i := 0; i < state.Threads; i++ {
-		go func() {
-			CheckWildcardSubdomain(state, state.Domain, channel)
-			wg.Done()
-		}()
-	} 
+		go CheckWildcardSubdomain(state, state.Domain, channel, donech, result)
+	}
 
 	for _, entry := range subdomains {
 		sub := strings.Join(strings.Split(entry, ".")[:2][:], ".")
@@ -103,7 +98,9 @@ func RemoveWildcardSubdomains(state *State, subdomains []string) []string {
 
 	close(channel)
 
-	wg.Wait()
+	for i := 0; i < state.Threads; i++ {
+		<-donech
+	}
 
 	return validSubdomains
 }
