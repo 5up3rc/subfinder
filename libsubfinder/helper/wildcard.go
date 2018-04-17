@@ -69,7 +69,9 @@ func CheckWildcardSubdomain(state *State, domain string, words <-chan string, wg
 func RemoveWildcardSubdomains(state *State, subdomains []string) []string {
 	wildcard := InitializeWildcardDNS(state)
 	if wildcard == true {
-		fmt.Printf("\n\n%s[!]%s Wildcard DNS Detected ! False Positives are likely :-(\n\n", Cyan, Reset)
+		if state.Silent != true {
+			fmt.Printf("\n\n%s[!]%s Wildcard DNS Detected ! False Positives are likely :-(\n\n", Cyan, Reset)
+		}
 	}
 
 	var wg sync.WaitGroup

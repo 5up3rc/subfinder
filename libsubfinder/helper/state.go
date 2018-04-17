@@ -27,6 +27,7 @@ type State struct {
 	WildcardForced bool      // Force processing of wildcard DNS Responses
 	Sources        string    // Comma separated list of sources to use
 	FinalResults   []string  // Final array containing bruteforced subdomains
+	Silent         bool      // Flag to specify that output should be silent with only subdomains
 
 	ConfigState Config // Current configuration file state
 }
